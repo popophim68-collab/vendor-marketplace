@@ -1,47 +1,23 @@
 <?php
 namespace VMP\Database\Migrations;
 
-defined('ABSPATH') || exit;
+class CreateVendorTables {
+    public static function up(): void {
+        $base = __DIR__;
 
-class CreateVendorTables
-{
-    public static function up(): void
-    {
-        global $wpdb;
-        $charset = $wpdb->get_charset_collate();
-        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        $files = [
+            $base . '/001_create_vendor_requests_table.php',
+            $base . '/002_create_vendor_request_logs_table.php',
+            $base . '/003_create_vendor_stores_table.php',
+            $base . '/004_create_vendor_verifications_table.php',
+            $base . '/005_create_vendor_settings_table.php',
+        ];
 
-        $sql = [];
-        $prefix = $wpdb->prefix;
-
-        $sql[] = "CREATE TABLE IF NOT EXISTS {$prefix}vmp_vendor_requests (
-            id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-            user_id BIGINT(20) UNSIGNED NOT NULL,
-            store_name VARCHAR(191) NOT NULL,
-            store_slug VARCHAR(191) NOT NULL,
-            status VARCHAR(50) NOT NULL DEFAULT 'pending',
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY user_id (user_id),
-            KEY store_slug (store_slug)
-        ) $charset;";
-
-        $sql[] = "CREATE TABLE IF NOT EXISTS {$prefix}vmp_vendors (
-            id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-            user_id BIGINT(20) UNSIGNED NOT NULL,
-            store_name VARCHAR(191) NOT NULL,
-            store_slug VARCHAR(191) NOT NULL,
-            status VARCHAR(50) NOT NULL DEFAULT 'active',
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY user_id (user_id),
-            KEY store_slug (store_slug)
-        ) $charset;";
-
-        foreach ($sql as $query) {
-            dbDelta($query);
+        foreach ($files as $file) {
+            if (file_exists($file)) {
+                include_once $file;
+                // each migration file defines and calls its migration function on include
+            }
         }
     }
 }
