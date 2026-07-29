@@ -20,7 +20,7 @@ class AdminController
 
     public function approve(WP_REST_Request $request): WP_REST_Response
     {
-        if (!current_user_can('manage_options')) {
+        if (!current_user_can('manage_vmp_requests')) {
             return new WP_REST_Response(['error' => 'forbidden'], 403);
         }
         $id = (int) $request->get_param('id');
@@ -34,7 +34,7 @@ class AdminController
 
     public function reject(WP_REST_Request $request): WP_REST_Response
     {
-        if (!current_user_can('manage_options')) {
+        if (!current_user_can('manage_vmp_requests')) {
             return new WP_REST_Response(['error' => 'forbidden'], 403);
         }
         $id = (int) $request->get_param('id');

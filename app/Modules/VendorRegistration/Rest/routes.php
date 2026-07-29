@@ -32,12 +32,12 @@ add_action('rest_api_init', function() {
     register_rest_route('vmp/v1', '/admin/vendor/(?P<id>\d+)/approve', [
         'methods' => 'POST',
         'callback' => [$adminController, 'approve'],
-        'permission_callback' => function() { return current_user_can('manage_options'); },
+        'permission_callback' => function() { return current_user_can('manage_vmp_requests'); },
     ]);
 
     register_rest_route('vmp/v1', '/admin/vendor/(?P<id>\d+)/reject', [
         'methods' => 'POST',
         'callback' => [$adminController, 'reject'],
-        'permission_callback' => function() { return current_user_can('manage_options'); },
+        'permission_callback' => function() { return current_user_can('manage_vmp_requests'); },
     ]);
 });
