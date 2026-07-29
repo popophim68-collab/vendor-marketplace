@@ -2,7 +2,6 @@
 namespace VMP\Modules\VendorRegistration\Listeners;
 
 use VMP\Modules\VendorRegistration\Events\VendorApproved;
-use VMP\Modules\VendorRegistration\Services\StateMachine;
 
 class CreateStoreOnApproval {
     public function handle(VendorApproved $event): void {
@@ -11,6 +10,11 @@ class CreateStoreOnApproval {
         $table = $wpdb->prefix . 'vmp_vendor_stores';
         $vendorId = $event->request->user_id ?? 0;
         $slug = sanitize_title($event->request->username ?? 'vendor-' . $vendorId);
+        // ensure unique slug (append id if exists)
+        $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM $table WHERE store_slug = %s", $slug));
+        if ($exists) {
+            $slug .= '-' . $vendorId;
+        }
         $wpdb->insert($table, [
             'vendor_id' => $vendorId,
             'store_name' => $event->request->username ?? 'Store',
@@ -20,3 +24,15 @@ class CreateStoreOnApproval {
         ]);
     }
 }
+
+// Register listener to the WP action fired on approval
+add_action('vmp_vendor_approved', function($event) {
+    try {
+        $listener = new CreateStoreOnApproval();
+        if ($event instanceof VendorApproved) {
+            $listener->handle($event);
+        }
+    } catch (\Throwable $e) {
+        error_log('CreateStoreOnApproval failed: ' . $e->getMessage());
+    }
+});
