@@ -1,5 +1,5 @@
 <?php
-// Rest routes for vendor registration (extended with admin endpoints)
+// Rest routes for vendor registration (extended with store setup endpoints)
 add_action('rest_api_init', function() {
     $regController = \VMP\Modules\VendorRegistration\Controllers\RegistrationController::class;
     register_rest_route('vmp/v1', '/vendor/register', [
@@ -24,6 +24,28 @@ add_action('rest_api_init', function() {
             if (!$existing) return new WP_REST_Response(['draft' => null]);
             return new WP_REST_Response(['draft' => json_decode($existing->draft_data, true)]);
         },
+        'permission_callback' => function() { return is_user_logged_in(); },
+    ]);
+
+    // Verification endpoints
+    $verificationController = \VMP\Modules\VendorRegistration\Controllers\VerificationController::class;
+    register_rest_route('vmp/v1', '/vendor/verify/(?P<type>email|phone)', [
+        'methods' => 'POST',
+        'callback' => [$verificationController, 'handle'],
+        'permission_callback' => function() { return true; },
+    ]);
+
+    // Store setup endpoints
+    $storeController = \VMP\Modules\VendorRegistration\Controllers\StoreController::class;
+    register_rest_route('vmp/v1', '/vendor/store/setup', [
+        'methods' => 'POST',
+        'callback' => [$storeController, 'setup'],
+        'permission_callback' => function() { return is_user_logged_in(); },
+    ]);
+
+    register_rest_route('vmp/v1', '/vendor/store', [
+        'methods' => 'GET',
+        'callback' => [$storeController, 'getStore'],
         'permission_callback' => function() { return is_user_logged_in(); },
     ]);
 
