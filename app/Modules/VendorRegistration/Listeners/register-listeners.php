@@ -1,21 +1,6 @@
 <?php
-// Register listeners for vendor events and perform one-time capabilities registration.
-use VMP\Modules\VendorRegistration\Services\CapabilityManager;
-use VMP\Modules\VendorRegistration\Config\Capabilities;
-
+// Register listeners for vendor events. This file should be included on plugins_loaded.
 add_action('plugins_loaded', function() {
-    // Ensure capabilities are provisioned when upgrading from older versions.
-    // We check the stored capabilities version and only run registration when it differs.
-    if (function_exists('get_option') && function_exists('update_option')) {
-        $stored = get_option('vmp_capabilities_version');
-        if ($stored !== Capabilities::CAPABILITIES_VERSION) {
-            if (class_exists(CapabilityManager::class)) {
-                CapabilityManager::register();
-                update_option('vmp_capabilities_version', Capabilities::CAPABILITIES_VERSION);
-            }
-        }
-    }
-
     // services
     $templatesDir = plugin_dir_path(__FILE__) . '/../../../templates/emails';
     $emailChannel = new \VMP\Modules\VendorRegistration\Services\NotificationChannels\EmailChannel($templatesDir);
