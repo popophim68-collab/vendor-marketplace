@@ -21,7 +21,14 @@ $session_uuid = '';
     <div class="vmp-wizard">
       <header class="vmp-wizard-header">
         <h1><?php _e('معالج إعداد المتجر', 'vmp'); ?></h1>
-        <div id="vmp-wizard-progress" class="vmp-progress"></div>
+        <div class="vmp-wizard-meta">
+          <div id="vmp-wizard-progress" class="vmp-progress"></div>
+          <div id="vmp-autosave-status" class="vmp-autosave-status">
+            <span id="vmp-autosave-indicator" class="status-dot">○</span>
+            <span id="vmp-autosave-label">غير محفوظ</span>
+            <span id="vmp-last-saved" class="vmp-last-saved"></span>
+          </div>
+        </div>
       </header>
       <main id="vmp-wizard-main" class="vmp-wizard-main">
         <!-- wizard will be rendered here by JS -->
@@ -29,11 +36,20 @@ $session_uuid = '';
     </div>
   </div>
 
+  <div id="vmp-session-overlay" class="vmp-session-overlay" style="display:none">
+    <div class="vmp-session-overlay-inner">
+      <h2><?php _e('انتهت صلاحية جلسة إعداد المتجر', 'vmp'); ?></h2>
+      <p><?php _e('تمت انتهاء صلاحية جلسة الإعداد. يمكنك بدء جلسة جديدة للاستمرار في إعداد متجرك.', 'vmp'); ?></p>
+      <button id="vmp-start-new-session" class="button"><?php _e('بدء جلسة جديدة', 'vmp'); ?></button>
+    </div>
+  </div>
+
 <script>
   window.VMP_StoreSetup = {
     restBase: '<?php echo $rest_base; ?>',
     nonce: '<?php echo $nonce; ?>',
-    pluginUrl: '<?php echo esc_url(trailingslashit(VMP_PLUGIN_URL)); ?>'
+    pluginUrl: '<?php echo esc_url(trailingslashit(VMP_PLUGIN_URL)); ?>',
+    debug: <?php echo defined('WP_DEBUG') && WP_DEBUG ? 'true' : 'false'; ?>
   };
 </script>
 <script type="module" src="<?php echo esc_url(trailingslashit(VMP_PLUGIN_URL) . 'assets/js/vendor/store-setup-wizard.js'); ?>"></script>

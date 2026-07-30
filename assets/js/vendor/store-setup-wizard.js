@@ -2,6 +2,7 @@
 const REST_BASE = window.VMP_StoreSetup.restBase;
 const NONCE = window.VMP_StoreSetup.nonce;
 const PLUGIN_URL = window.VMP_StoreSetup.pluginUrl;
+const DEBUG = !!window.VMP_StoreSetup.debug;
 
 const steps = [
   { id: 1, title: 'معلومات المتجر', key: 'store' },
@@ -15,22 +16,41 @@ let session = null;
 let sessionUuid = null;
 let currentStep = 1;
 let debounceTimer = null;
+let saveAbortController = null;
+let savePendingPayload = null; // latest payload waiting to be sent
+let lastSavedAt = null;
+let lastSavedInterval = null;
+let offlineQueue = [];
 
+function log(...args){ if(DEBUG) console.debug('[VMP.Wizard]', ...args); }
 function qs(sel, ctx=document) { return ctx.querySelector(sel); }
 function ce(tag, attrs={}, txt='') { const el = document.createElement(tag); for(const k in attrs) el.setAttribute(k, attrs[k]); if (txt) el.textContent = txt; return el; }
 
-function showToast(msg) {
-  let t = document.getElementById('vmp-toast');
-  if (!t) { t = document.createElement('div'); t.id='vmp-toast'; t.className='toast'; document.body.appendChild(t); }
-  t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2500);
+function setAutosaveStatus(state, msg=''){
+  const dot = qs('#vmp-autosave-indicator');
+  const label = qs('#vmp-autosave-label');
+  const lastEl = qs('#vmp-last-saved');
+  if (!dot || !label) return;
+  switch(state){
+    case 'idle': dot.textContent='○'; label.textContent='غير محفوظ'; lastEl.textContent=''; break;
+    case 'saving': dot.textContent='🟡'; label.textContent='يتم الحفظ...'; if(msg) lastEl.textContent = msg; break;
+    case 'saved': dot.textContent='🟢'; label.textContent='تم الحفظ'; if(msg) lastEl.textContent = msg; break;
+    case 'error': dot.textContent='🔴'; label.textContent='خطأ بالحفظ'; if(msg) lastEl.textContent = msg; break;
+  }
 }
 
-function setProgress() {
-  const prog = Math.round((currentStep-1)/(steps.length-1)*100);
-  const cont = qs('#vmp-wizard-progress');
-  cont.innerHTML = `<div class="bar" style="width:${prog}%"></div>`;
-  const label = qs('#vmp-wizard-progress-label');
-  if (label) label.textContent = `Step ${currentStep} of ${steps.length}`;
+function timeAgoString(date){
+  if(!date) return '';
+  const diff = Math.floor((Date.now() - date)/1000);
+  if(diff < 60) return `منذ ${diff} ثانية`;
+  if(diff < 3600) return `منذ ${Math.floor(diff/60)} دقيقة`;
+  if(diff < 86400) return `منذ ${Math.floor(diff/3600)} ساعة`;
+  return `منذ ${Math.floor(diff/86400)} يوم`;
+}
+
+function updateLastSavedClock(){
+  if(!lastSavedAt) return;
+  qs('#vmp-last-saved').textContent = timeAgoString(lastSavedAt);
 }
 
 async function api(path, method='GET', body=null, headers={}){
@@ -38,22 +58,22 @@ async function api(path, method='GET', body=null, headers={}){
   const opts = { method, credentials: 'same-origin', headers: Object.assign({'X-WP-Nonce': NONCE}, headers) };
   if (body) { opts.body = typeof body === 'string' ? body : JSON.stringify(body); opts.headers['Content-Type'] = 'application/json'; }
   const res = await fetch(url, opts);
-  return res.json();
+  const contentType = res.headers.get('content-type') || '';
+  let json = null;
+  if (contentType.includes('application/json')) json = await res.json().catch(()=>null);
+  return { status: res.status, json };
 }
 
 async function ensureSession(){
-  // check localStorage
   sessionUuid = localStorage.getItem('vmp_store_setup_uuid');
   if (sessionUuid) {
-    const s = await api('/store-setup/state?session_uuid=' + encodeURIComponent(sessionUuid));
-    if (s && s.success) { session = s.session; currentStep = session.current_step || 1; renderWizard(); setProgress(); return; }
-    // else remove invalid
-    localStorage.removeItem('vmp_store_setup_uuid');
-    sessionUuid = null;
+    const {status, json} = await api('/store-setup/state?session_uuid=' + encodeURIComponent(sessionUuid));
+    if (status === 200 && json && json.success) { session = json.session; currentStep = session.current_step || 1; startLastSavedClock(session.last_activity_at); renderWizard(); setProgress(); return; }
+    // if 404 or expired remove
+    if (status === 404 || (json && json.error === 'not_found')) { localStorage.removeItem('vmp_store_setup_uuid'); sessionUuid = null; }
   }
-  // create new
-  const res = await api('/store-setup/start', 'POST', {});
-  if (res && res.success) { session = res.session; sessionUuid = session.session_uuid; localStorage.setItem('vmp_store_setup_uuid', sessionUuid); currentStep = session.current_step || 1; renderWizard(); setProgress(); showToast('تم إنشاء جلسة الإعداد'); }
+  const { status, json } = await api('/store-setup/start', 'POST', {});
+  if (status === 201 && json && json.success) { session = json.session; sessionUuid = session.session_uuid; localStorage.setItem('vmp_store_setup_uuid', sessionUuid); currentStep = session.current_step || 1; renderWizard(); setProgress(); startLastSavedClock(session.last_activity_at); showToast('تم إنشاء جلسة الإعداد'); }
 }
 
 function renderWizard(){
@@ -67,7 +87,6 @@ function renderWizard(){
     if (s.id === currentStep) stepEl.classList.add('active');
     const h = ce('h2',{}, s.title);
     stepEl.appendChild(h);
-    // form content per step
     const container = ce('div',{class:'step-content'});
     if (s.id === 1) {
       container.appendChild(ce('label',{class:'label'}, 'اسم المتجر'));
@@ -115,7 +134,6 @@ function renderWizard(){
     }
 
     stepEl.appendChild(container);
-    // actions
     const actions = ce('div',{class:'row-actions'});
     if (s.id > 1) actions.appendChild(ce('button',{class:'button secondary', id:`prev_${s.id}`}, 'السابق'));
     if (s.id < steps.length) actions.appendChild(ce('button',{class:'button', id:`next_${s.id}`}, 'التالي'));
@@ -137,36 +155,108 @@ function getStepData(step) {
   return {};
 }
 
-function debounceSave(step) {
+function scheduleSave(step){
+  // latest-wins queue: store latest payload and abort previous save
+  savePendingPayload = { step, payload: getStepData(step) };
   if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(()=> saveStep(step), 400);
+  debounceTimer = setTimeout(()=> doSaveLatest(), 400);
 }
 
-async function saveStep(step) {
-  const data = getStepData(step);
-  showSpinner(true);
+async function doSaveLatest(){
+  if (!savePendingPayload) return;
+  if (!navigator.onLine) {
+    // offline -> queue in localStorage
+    log('Offline: queueing payload');
+    queueOffline(savePendingPayload);
+    setAutosaveStatus('error', 'لا يوجد اتصال. سيتم المزامنة عند العودة.');
+    savePendingPayload = null;
+    return;
+  }
+
+  // abort previous
+  if (saveAbortController) {
+    log('Aborting previous save');
+    saveAbortController.abort();
+  }
+  saveAbortController = new AbortController();
+  const { step, payload } = savePendingPayload;
+  savePendingPayload = null;
+
+  // idempotency key
+  const idempKey = 'save-' + sessionUuid + '-' + step + '-' + Date.now();
+  setAutosaveStatus('saving');
+  log('Autosave started', { step });
+
   try {
-    const res = await api('/store-setup/step/' + step, 'POST', data, { 'X-Session-UUID': sessionUuid });
-    showSpinner(false);
-    if (res && res.success) {
-      session = res.session;
-      currentStep = session.current_step || step;
-      setProgress();
-      showToast('تم الحفظ');
+    const res = await fetch(REST_BASE + '/store-setup/step/' + step, {
+      method: 'POST',
+      headers: { 'X-WP-Nonce': NONCE, 'Content-Type': 'application/json', 'X-Session-UUID': sessionUuid, 'X-Idempotency-Key': idempKey },
+      body: JSON.stringify(payload),
+      credentials: 'same-origin',
+      signal: saveAbortController.signal
+    });
+    const json = await res.json().catch(()=>null);
+    if (res.ok && json && json.success) {
+      session = json.session;
+      lastSavedAt = Date.now();
+      startLastSavedClock();
+      setAutosaveStatus('saved', timeAgoString(lastSavedAt));
+      log('Autosave finished', { step });
     } else {
-      console.error('save error', res);
-      showToast('فشل الحفظ');
+      // handle categorized errors
+      const message = mapError(res.status, json);
+      setAutosaveStatus('error', message);
+      log('Autosave failed', { step, status: res.status, json });
     }
   } catch (e) {
-    showSpinner(false);
-    console.error(e); showToast('خطأ في الشبكة');
+    if (e.name === 'AbortError') { log('Autosave cancelled'); setAutosaveStatus('idle'); return; }
+    log('Autosave exception', e);
+    setAutosaveStatus('error', 'خطأ في الشبكة');
   }
 }
 
-function showSpinner(on){
-  let s = qs('#vmp-spinner');
-  if (!s) { s = ce('span',{id:'vmp-spinner', class:'spinner'}); qs('#vmp-wizard-progress').appendChild(s); }
-  s.style.display = on ? 'inline-block' : 'none';
+function queueOffline(item){
+  try {
+    const key = 'vmp_offline_queue';
+    const arr = JSON.parse(localStorage.getItem(key) || '[]');
+    arr.push(item);
+    localStorage.setItem(key, JSON.stringify(arr));
+  } catch(e){ log('queueOffline failed', e); }
+}
+
+async function flushOfflineQueue(){
+  const key = 'vmp_offline_queue';
+  const arr = JSON.parse(localStorage.getItem(key) || '[]');
+  if (!arr.length) return;
+  log('Flushing offline queue', arr.length);
+  for(const item of arr){
+    savePendingPayload = item;
+    await doSaveLatest();
+  }
+  localStorage.removeItem(key);
+  showToast('✓ تمت المزامنة');
+}
+
+function startLastSavedClock(initialIso){
+  if (initialIso) lastSavedAt = new Date(initialIso + 'Z').getTime();
+  if (lastSavedInterval) clearInterval(lastSavedInterval);
+  if (lastSavedAt) {
+    updateLastSavedClock();
+    lastSavedInterval = setInterval(updateLastSavedClock, 60 * 1000);
+  }
+}
+
+function mapError(status, json){
+  if (!status) return 'خطأ غير معروف';
+  switch(status){
+    case 401: return 'يرجى تسجيل الدخول.';
+    case 403: return 'ليست لديك صلاحية.';
+    case 404: return 'الجلسة غير موجودة.';
+    case 409: return 'حدث تعارض، حاول مرة أخرى.';
+    case 422: return (json && json.errors) ? JSON.stringify(json.errors) : 'بيانات غير صحيحة.';
+    case 500: return 'خطأ داخلي بالخادم.';
+    default: return (json && json.error) ? json.error : 'خطأ في الطلب.';
+  }
 }
 
 function bindEvents(){
@@ -174,13 +264,13 @@ function bindEvents(){
     const prev = qs(`#prev_${s.id}`);
     const next = qs(`#next_${s.id}`);
     if (prev) prev.addEventListener('click', ()=> switchStep(s.id-1));
-    if (next) next.addEventListener('click', ()=> { if (validateStep(s.id)) { debounceSave(s.id); switchStep(s.id+1); } });
+    if (next) next.addEventListener('click', ()=> { if (validateStep(s.id)) { scheduleSave(s.id); switchStep(s.id+1); } });
   });
   const finish = qs('#finish_btn'); if (finish) finish.addEventListener('click', onFinish);
 
   // Bind input listeners for autosave
   ['#store_name','#store_description','#brand_color','#contact_phone','#contact_email','#contact_address','#policy_shipping','#policy_returns','#policy_privacy','#social_facebook','#social_instagram','#social_x','#social_website'].forEach(sel => {
-    const el = qs(sel); if (el) el.addEventListener('input', ()=> debounceSave(currentStep));
+    const el = qs(sel); if (el) el.addEventListener('input', ()=> scheduleSave(currentStep));
   });
 
   // slug preview from name
@@ -188,10 +278,24 @@ function bindEvents(){
     const slug = nameInput.value.toLowerCase().trim().replace(/[^a-z0-9\s\-]/gi,'').replace(/\s+/g,'-').replace(/\-+/g,'-');
     qs('#slug_preview').textContent = slug || '';
   });
+
+  // offline/online
+  window.addEventListener('online', ()=>{ log('Back online'); setAutosaveStatus('idle'); flushOfflineQueue(); showToast('متصل مجدداً'); });
+  window.addEventListener('offline', ()=>{ log('Offline'); setAutosaveStatus('error','لا يوجد اتصال. سيتم المزامنة عند العودة.'); showToast('لا يوجد اتصال بالإنترنت'); });
+
+  // session overlay button
+  const startBtn = qs('#vmp-start-new-session'); if (startBtn) startBtn.addEventListener('click', async ()=>{
+    const {status,json} = await api('/store-setup/start', 'POST', {});
+    if (status === 201 && json && json.success) {
+      localStorage.setItem('vmp_store_setup_uuid', json.session.session_uuid);
+      location.reload();
+    } else {
+      alert('فشل بدء جلسة جديدة');
+    }
+  });
 }
 
 function validateStep(step){
-  // basic client side validation
   if (step === 1) {
     const name = qs('#store_name')?.value || '';
     if (!name.trim()) { alert('اسم المتجر مطلوب'); return false; }
@@ -205,34 +309,53 @@ function validateStep(step){
 
 function switchStep(next){
   if (next < 1 || next > steps.length) return;
-  qs(`.step.active`).classList.remove('active');
+  const cur = qs(`.step.active`); if (cur) cur.classList.remove('active');
   const newEl = qs(`.step[data-step="${next}"]`);
   if (newEl) newEl.classList.add('active');
   currentStep = next; setProgress();
 }
 
+function setProgress() {
+  const prog = Math.round((currentStep-1)/(steps.length-1)*100);
+  const cont = qs('#vmp-wizard-progress');
+  cont.innerHTML = `<div class="bar" style="width:${prog}%"></div>`;
+  const label = qs('#vmp-wizard-progress-label'); if (label) label.textContent = `Step ${currentStep} of ${steps.length}`;
+}
+
+function showToast(msg) {
+  let t = document.getElementById('vmp-toast');
+  if (!t) { t = document.createElement('div'); t.id='vmp-toast'; t.className='toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2500);
+}
+
 async function onFinish(){
   if (!confirm('هل أنت متأكد من إكمال إعداد المتجر؟')) return;
-  showSpinner(true);
+  setAutosaveStatus('saving');
   try {
     const res = await api('/store-setup/finish', 'POST', {}, {'X-Session-UUID': sessionUuid});
-    showSpinner(false);
-    if (res && res.success) {
+    if (res.status === 200 && res.json && res.json.success) {
+      setAutosaveStatus('saved', 'تم الانتهاء');
       showToast('اكتمل إعداد المتجر، قيد مراجعة المشرف');
-      // redirect to dashboard or show message
-      setTimeout(()=>{ window.location.href = '/'; }, 1800);
+      // go to status page
+      setTimeout(()=>{ window.location.href = '/vendor/store/status'; }, 1200);
     } else {
-      console.error(res); alert('فشل الإنهاء: ' + (res.error || 'خطأ'));
+      const message = mapError(res.status, res.json);
+      setAutosaveStatus('error', message);
+      alert('فشل الإنهاء: ' + message);
     }
-  } catch(e){ showSpinner(false); console.error(e); alert('خطأ في الشبكة'); }
+  } catch(e){ setAutosaveStatus('error','خطأ في الشبكة'); console.error(e); }
 }
 
 // init on load
 window.addEventListener('DOMContentLoaded', async ()=>{
-  // render empty wizard then ensure session
   renderWizard();
   setProgress();
+  bindEvents();
   await ensureSession();
+  // if session expired show overlay
+  if (session && session.status === 'expired') {
+    qs('#vmp-session-overlay').style.display = 'flex';
+  }
 });
 
 export {};
