@@ -12,6 +12,8 @@ defined('ABSPATH') || exit;
 require_once __DIR__ . '/vendor/autoload.php';
 
 use VMP\Core\Application;
+use VMP\Modules\VendorRegistration\Config\Capabilities;
+use VMP\Modules\VendorRegistration\Services\CapabilityManager;
 
 // Const
 if (!defined('VMP_PLUGIN_URL')) {
@@ -38,6 +40,15 @@ add_action('plugins_loaded', function () {
     // Load textdomain
     load_plugin_textdomain('vmp', false, dirname(plugin_basename(__FILE__)) . '/languages');
 
+    // Ensure capabilities are provisioned (run once on version mismatch)
+    if (function_exists('get_option') && function_exists('update_option')) {
+        $current = get_option('vmp_capabilities_version', '');
+        if ($current !== Capabilities::CAPABILITIES_VERSION) {
+            CapabilityManager::register();
+            update_option('vmp_capabilities_version', Capabilities::CAPABILITIES_VERSION);
+        }
+    }
+
     // Boot plugin via Application (new architecture)
     $plugin = new Application(__FILE__);
     $plugin->boot();
@@ -45,12 +56,20 @@ add_action('plugins_loaded', function () {
 
 // Activation hook
 register_activation_hook(__FILE__, function () {
+    // Ensure capabilities exist for new installs
+    \VMP\Modules\VendorRegistration\Services\CapabilityManager::register();
+
+    update_option(
+        'vmp_capabilities_version',
+        \VMP\Modules\VendorRegistration\Config\Capabilities::CAPABILITIES_VERSION
+    );
+
     $migration = __DIR__ . '/app/Database/Migrations/CreateVendorTables.php';
     if (file_exists($migration)) {
         require_once $migration;
         \VMP\Database\Migrations\CreateVendorTables::up();
     }
-    
+
     // Flush rewrite rules
     flush_rewrite_rules();
 });
