@@ -135,4 +135,12 @@ class StoreSetupRepository implements StoreSetupSessionRepositoryInterface
         $res = $this->wpdb->query($this->wpdb->prepare("UPDATE {$this->table} SET status = 'expired' WHERE expires_at < %s AND status != 'expired'", $cutoff));
         return $res;
     }
+
+    public function countPayloadReferences(int $attachmentId): int
+    {
+        // naive JSON LIKE search to find references to the attachment id in payload column
+        $like = '%"' . intval($attachmentId) . '"%';
+        $count = (int) $this->wpdb->get_var($this->wpdb->prepare("SELECT COUNT(*) FROM {$this->table} WHERE payload LIKE %s", $like));
+        return $count;
+    }
 }
