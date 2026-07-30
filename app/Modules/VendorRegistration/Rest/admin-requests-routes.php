@@ -1,7 +1,5 @@
 <?php
 // Admin requests REST routes
-use VMP\Modules\VendorRegistration\Services\PermissionService;
-
 add_action('rest_api_init', function() {
     $ns = 'vmp/v1';
 
@@ -11,7 +9,7 @@ add_action('rest_api_init', function() {
             $controller = new \VMP\Modules\VendorRegistration\Controllers\AdminRequestsController();
             return $controller->listRequests($request);
         },
-        'permission_callback' => function() { return \VMP\Modules\VendorRegistration\Services\PermissionService::canManageVendorRequests(); },
+        'permission_callback' => function() { return current_user_can('manage_vmp_requests'); },
     ]);
 
     register_rest_route($ns, '/admin/requests/(?P<id>\d+)', [
@@ -20,7 +18,7 @@ add_action('rest_api_init', function() {
             $controller = new \VMP\Modules\VendorRegistration\Controllers\AdminRequestsController();
             return $controller->getRequest($request);
         },
-        'permission_callback' => function() { return \VMP\Modules\VendorRegistration\Services\PermissionService::canManageVendorRequests(); },
+        'permission_callback' => function() { return current_user_can('manage_vmp_requests'); },
     ]);
 
     register_rest_route($ns, '/admin/requests/(?P<id>\d+)/health', [
@@ -29,7 +27,7 @@ add_action('rest_api_init', function() {
             $controller = new \VMP\Modules\VendorRegistration\Controllers\AdminRequestsController();
             return $controller->healthSummary($request);
         },
-        'permission_callback' => function() { return \VMP\Modules\VendorRegistration\Services\PermissionService::canManageVendorRequests(); },
+        'permission_callback' => function() { return current_user_can('manage_vmp_requests'); },
     ]);
 
     register_rest_route($ns, '/admin/requests/(?P<id>\d+)/activity', [
@@ -38,7 +36,7 @@ add_action('rest_api_init', function() {
             $controller = new \VMP\Modules\VendorRegistration\Controllers\AdminRequestsController();
             return $controller->getActivity($request);
         },
-        'permission_callback' => function() { return \VMP\Modules\VendorRegistration\Services\PermissionService::canManageVendorRequests(); },
+        'permission_callback' => function() { return current_user_can('manage_vmp_requests'); },
     ]);
 
     register_rest_route($ns, '/admin/requests/bulk', [
@@ -47,7 +45,7 @@ add_action('rest_api_init', function() {
             $controller = new \VMP\Modules\VendorRegistration\Controllers\AdminRequestsController();
             return $controller->bulkAction($request);
         },
-        'permission_callback' => function() { return \VMP\Modules\VendorRegistration\Services\PermissionService::canManageVendorRequests(); },
+        'permission_callback' => function() { return current_user_can('manage_vmp_requests'); },
     ]);
 
 });
