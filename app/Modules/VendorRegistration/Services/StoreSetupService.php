@@ -1,87 +1,107 @@
 <?php
 namespace VMP\Modules\VendorRegistration\Services;
 
-use VMP\Modules\VendorRegistration\Repositories\VendorStoreRepositoryInterface;
+use VMP\Modules\VendorRegistration\Repositories\StoreSetupSessionRepositoryInterface;
 use VMP\Modules\VendorRegistration\Repositories\VendorRequestRepositoryInterface;
-use VMP\Modules\VendorRegistration\DTOs\StoreSetupDTO;
+use VMP\Modules\VendorRegistration\Repositories\VendorStoreRepositoryInterface;
 
-class StoreSetupService
+class StoreSetupService implements StoreSetupServiceInterface
 {
-    public function __construct(private VendorStoreRepositoryInterface $storesRepo, private VendorRequestRepositoryInterface $requestsRepo)
-    {
+    public function __construct(
+        private StoreSetupSessionRepositoryInterface $sessionsRepo,
+        private VendorRequestRepositoryInterface $requestsRepo,
+        private VendorStoreRepositoryInterface $storesRepo,
+        private EventBus $bus,
+        private IdempotencyService $idemp
+    ) {
     }
 
-    private function hasProductsForVendor(int $vendorId): bool
+    public function startSession(int $userId, int $vendorRequestId = 0): object
     {
-        global $wpdb;
-        $posts_table = $wpdb->posts;
-        $count = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(ID) FROM {$posts_table} WHERE post_type = %s AND post_author = %d", 'product', $vendorId));
-        return $count > 0;
+        return $this->sessionsRepo->start($userId, $vendorRequestId, []);
     }
 
-    /**
-     * Setup store for vendor and mark setup completed.
-     * Returns updated store object.
-     */
-    public function setup(int $vendorId, StoreSetupDTO $dto): object
+    public function getSessionByUuid(string $uuid): ?object
     {
-        $existing = $this->storesRepo->findByVendor($vendorId);
-        $data = $dto->toArray();
-        $data['vendor_id'] = $vendorId;
+        return $this->sessionsRepo->findByUuid($uuid);
+    }
 
-        // Ensure slug generation using SlugGeneratorService
-        $slugService = new SlugGeneratorService($this->storesRepo);
+    public function saveStep(int $sessionId, int $step, array $payloadPart): bool
+    {
+        // Server side validation should be done by callers (validators)
+        return $this->sessionsRepo->saveStep($sessionId, $step, $payloadPart);
+    }
 
-        // Determine desired slug
-        if (!empty($data['store_slug'])) {
-            $desired = $data['store_slug'];
-        } elseif (!empty($data['store_name'])) {
-            $desired = $data['store_name'];
-        } else {
-            $desired = 'vendor-' . $vendorId;
+    public function finishSession(int $sessionId, ?string $idempotencyKey = null): bool
+    {
+        // Idempotency guard
+        if ($idempotencyKey && $this->idemp->exists($idempotencyKey)) {
+            return true;
         }
 
-        $generatedSlug = $slugService->generateUnique($desired, $vendorId);
-        $data['store_slug'] = $generatedSlug;
+        global $wpdb;
+        $wpdb->query('START TRANSACTION');
+        try {
+            $session = $this->sessionsRepo->findById($sessionId);
+            if (!$session) {
+                throw new \RuntimeException('Session not found');
+            }
 
-        if ($existing) {
-            // if slug changed, ensure permissions and product checks
-            if (!empty($data['store_slug']) && $data['store_slug'] !== $existing->store_slug) {
-                // if vendor already has products, only admin can change slug
-                if ($this->hasProductsForVendor($vendorId) && !current_user_can('manage_options')) {
-                    throw new \RuntimeException('Cannot change store slug after products exist. Contact admin.');
-                }
-
-                // check for uniqueness again (edge case)
-                $maybe = $this->storesRepo->findBySlug($data['store_slug']);
-                if ($maybe && (int)$maybe->vendor_id !== $vendorId) {
-                    // generate alternative unique slug
-                    $data['store_slug'] = $slugService->generateUnique($data['store_slug'], $vendorId);
+            // ensure all steps completed
+            $completed = json_decode($session->completed_steps, true) ?: [];
+            for ($i = 1; $i <= 5; $i++) {
+                if (!in_array($i, $completed, true)) {
+                    throw new \RuntimeException('Incomplete steps');
                 }
             }
 
-            $this->storesRepo->update((int)$existing->id, array_merge($data, ['setup_completed' => 1]));
-            $store = $this->storesRepo->findByVendor($vendorId);
-        } else {
-            $data['store_slug'] = $generatedSlug;
-            $data['setup_completed'] = 1;
-            $data['is_active'] = 0;
-            $this->storesRepo->create($data);
-            $store = $this->storesRepo->findByVendor($vendorId);
+            // mark session completed
+            $ok = $this->sessionsRepo->finish($sessionId);
+            if (!$ok) throw new \RuntimeException('Failed to mark session completed');
+
+            // update vendor request status via StateMachine flow
+            $request = $this->requestsRepo->find((int)$session->vendor_request_id);
+            if ($request) {
+                // transition request status to store_setup_completed via repository
+                $this->requestsRepo->updateStatus((int)$request->id, 'store_setup_completed', null);
+            }
+
+            // create store record (deferred details: storesRepo create method expects array)
+            // Build store data from payload
+            $payload = json_decode($session->payload, true) ?: [];
+            $storeData = [
+                'vendor_id' => (int)$session->user_id,
+                'store_name' => $payload['store']['store_name'] ?? null,
+                'store_slug' => $payload['store']['store_slug'] ?? null,
+                'description' => $payload['store']['description'] ?? null,
+                'logo' => $payload['branding']['logo'] ?? null,
+                'banner' => $payload['branding']['banner'] ?? null,
+                'contact' => wp_json_encode($payload['contact'] ?? []),
+                'policies' => wp_json_encode($payload['policies'] ?? []),
+                'social' => wp_json_encode($payload['social'] ?? []),
+                'setup_completed' => 1,
+                'is_active' => 0,
+            ];
+
+            // Use store repository to create; it should use SlugGeneratorService internally if slug empty/collision
+            $created = $this->storesRepo->create($storeData);
+            if (!$created) throw new \RuntimeException('Failed to create store');
+
+            // commit
+            $wpdb->query('COMMIT');
+
+            // Mark idempotency after commit
+            if ($idempotencyKey) $this->idemp->mark($idempotencyKey);
+
+            // Dispatch event after commit
+            $event = new \VMP\Modules\VendorRegistration\Events\StoreSetupCompleted($this->sessionsRepo->findById($sessionId));
+            $this->bus->dispatch($event);
+
+            return true;
+        } catch (\Throwable $e) {
+            $wpdb->query('ROLLBACK');
+            error_log('StoreSetupService::finishSession failed: ' . $e->getMessage());
+            throw $e;
         }
-
-        // Update vendor request status to 'store_active'
-        $request = $this->requestsRepo->findByUser($vendorId);
-        if ($request) {
-            $this->requestsRepo->updateStatus((int)$request->id, 'store_active', null);
-        }
-
-        return $store;
-    }
-
-    public function isSetupComplete(int $vendorId): bool
-    {
-        $store = $this->storesRepo->findByVendor($vendorId);
-        return $store && (int)$store->setup_completed === 1;
     }
 }
