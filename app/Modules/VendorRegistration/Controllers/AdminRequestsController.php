@@ -5,6 +5,7 @@ use WP_REST_Request;
 use WP_REST_Response;
 use VMP\Modules\VendorRegistration\Repositories\VendorRequestRepository;
 use VMP\Modules\VendorRegistration\Services\ActivityLogService;
+use VMP\Modules\VendorRegistration\Services\Health\HealthService;
 
 class AdminRequestsController
 {
@@ -66,35 +67,16 @@ class AdminRequestsController
     public function healthSummary(WP_REST_Request $request): WP_REST_Response
     {
         $id = (int) $request->get_param('id');
-        $r = $this->repo->find($id);
-        if (!$r) return new WP_REST_Response(['error' => 'not_found'], 404);
 
-        // compute simple health metrics
-        $total = 6; $score = 0; $warnings = [];
+        $healthService = new HealthService($this->repo);
+        $report = $healthService->getReport($id);
 
-        // logo/banner
-        if (!empty($r->logo)) $score++; else $warnings[] = 'Missing logo';
-        if (!empty($r->banner)) $score++; else $warnings[] = 'Missing banner';
-        // contact
-        if (!empty($r->contact_email) || !empty($r->contact_phone)) $score++; else $warnings[] = 'Missing contact info';
-        // policies
-        if (!empty($r->terms_accepted) || !empty($r->policies)) $score++; else $warnings[] = 'Missing policies';
-        // store fields
-        if (!empty($r->store_name) && !empty($r->store_description)) $score++; else $warnings[] = 'Incomplete store details';
-        // previous requests
-        $prevRequests = $this->repo->countRequestsByVendor($r->user_id ?? 0);
-        if ($prevRequests > 0) $score++; // counts as activity
+        // if the request was not found, mirror previous behavior
+        if ($report->percent_complete === 0 && in_array('not_found', $report->warnings, true)) {
+            return new WP_REST_Response(['error' => 'not_found'], 404);
+        }
 
-        $percent = (int) (($score / $total) * 100);
-
-        $summary = [
-            'percent_complete' => $percent,
-            'warnings' => $warnings,
-            'previous_requests' => $prevRequests,
-            'last_activity' => $r->updated_at ?? '',
-        ];
-
-        return new WP_REST_Response(['data' => $summary], 200);
+        return new WP_REST_Response(['data' => $report->toArray()], 200);
     }
 
     public function getActivity(WP_REST_Request $request): WP_REST_Response
