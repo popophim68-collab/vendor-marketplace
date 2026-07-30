@@ -1,0 +1,23 @@
+/* Minimal CSS for the Store Setup Wizard (mobile-first, RTL support) */
+:root{--primary:#0d6efd;--success:#198754;--danger:#dc3545}
+html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#f7f7f8;color:#222}
+.vmp-container{max-width:980px;margin:24px auto;padding:16px}
+.vmp-wizard{background:#fff;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.06);overflow:hidden}
+.vmp-wizard-header{padding:20px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between}
+.vmp-wizard-header h1{margin:0;font-size:18px}
+.vmp-progress{width:260px;height:18px;border-radius:9px;background:#eee;position:relative}
+.vmp-progress .bar{height:100%;background:var(--primary);width:0;border-radius:9px}
+.vmp-wizard-main{padding:20px}
+.step{display:none}
+.step.active{display:block}
+.form-row{margin-bottom:12px}
+.label{display:block;margin-bottom:6px;font-weight:600}
+.input,textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px}
+.row-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.button{padding:8px 14px;border:0;background:var(--primary);color:#fff;border-radius:4px;cursor:pointer}
+.button.secondary{background:#6c757d}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:8px 12px;border-radius:6px;opacity:0;transition:opacity .2s}
+.toast.show{opacity:1}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(0,0,0,.1);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;margin-left:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (max-width:600px){.vmp-progress{width:160px}}
