@@ -3,12 +3,14 @@ namespace VMP\Modules\VendorRegistration\Controllers;
 
 use WP_REST_Request;
 use WP_REST_Response;
-use VMP\Modules\VendorRegistration\Repositories\StoreSetupSessionRepository;
 use VMP\Modules\VendorRegistration\Repositories\StoreSetupSessionRepositoryInterface;
 use VMP\Modules\VendorRegistration\Services\StoreSetupServiceInterface;
-use VMP\Modules\VendorRegistration\Services\StoreSetupService;
 use VMP\Modules\VendorRegistration\Services\IdempotencyService;
 use VMP\Modules\VendorRegistration\Validators\StoreStep1Validator;
+use VMP\Modules\VendorRegistration\Validators\StoreStep2Validator;
+use VMP\Modules\VendorRegistration\Validators\StoreStep3Validator;
+use VMP\Modules\VendorRegistration\Validators\StoreStep4Validator;
+use VMP\Modules\VendorRegistration\Validators\StoreStep5Validator;
 
 class StoreSetupController
 {
@@ -62,10 +64,10 @@ class StoreSetupController
         // Step validators
         $validators = [
             1 => StoreStep1Validator::class,
-            // 2 => BrandingValidator::class,
-            // 3 => ContactValidator::class,
-            // 4 => PoliciesValidator::class,
-            // 5 => SocialValidator::class,
+            2 => StoreStep2Validator::class,
+            3 => StoreStep3Validator::class,
+            4 => StoreStep4Validator::class,
+            5 => StoreStep5Validator::class,
         ];
 
         if (isset($validators[$step])) {

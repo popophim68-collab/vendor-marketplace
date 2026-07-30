@@ -2,13 +2,14 @@
 namespace VMP\Modules\VendorRegistration\Services;
 
 use VMP\Modules\VendorRegistration\Repositories\VendorRequestRepositoryInterface;
-use VMP\Modules\VendorRegistration\Events\VendorApproved;
-use VMP\Modules\VendorRegistration\Events\VendorRejected;
 
 class ApprovalService
 {
-    public function __construct(private VendorRequestRepositoryInterface $requestsRepo, private StateMachine $stateMachine)
+    private EventBus $eventBus;
+
+    public function __construct(private VendorRequestRepositoryInterface $requestsRepo, private StateMachine $stateMachine, EventBus $eventBus)
     {
+        $this->eventBus = $eventBus;
     }
 
     /**
@@ -47,12 +48,13 @@ class ApprovalService
         // Reload request
         $request = $this->requestsRepo->find($requestId);
 
-        // Fire VendorApproved event
-        $event = new VendorApproved($request, $adminId);
-        /**
-         * Trigger a WP action so listeners can react (CreateStoreOnApproval, SendApprovalEmail, etc.)
-         */
-        do_action('vmp_vendor_approved', $event);
+        // Fire VendorApproved event via EventBus
+        $event = new \VMP\Modules\VendorRegistration\Events\VendorApproved($request, $adminId);
+        try {
+            $this->eventBus->dispatch($event);
+        } catch (\Throwable $e) {
+            error_log('ApprovalService event dispatch failed: ' . $e->getMessage());
+        }
 
         return true;
     }
@@ -77,8 +79,12 @@ class ApprovalService
         // Reload request
         $request = $this->requestsRepo->find($requestId);
 
-        $event = new VendorRejected($request, $reason);
-        do_action('vmp_vendor_rejected', $event);
+        $event = new \VMP\Modules\VendorRegistration\Events\VendorRejected($request, $reason);
+        try {
+            $this->eventBus->dispatch($event);
+        } catch (\Throwable $e) {
+            error_log('ApprovalService reject event dispatch failed: ' . $e->getMessage());
+        }
 
         return true;
     }

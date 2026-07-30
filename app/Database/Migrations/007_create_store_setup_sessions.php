@@ -11,6 +11,7 @@ $sql = "CREATE TABLE IF NOT EXISTS {$table} (
   session_uuid VARCHAR(191) NOT NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'draft',
   current_step INT NOT NULL DEFAULT 0,
+  last_saved_step INT NOT NULL DEFAULT 0,
   payload LONGTEXT NULL,
   completed_steps LONGTEXT NULL,
   started_at DATETIME NULL,

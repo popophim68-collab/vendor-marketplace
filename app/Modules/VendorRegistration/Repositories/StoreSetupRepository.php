@@ -17,13 +17,16 @@ class StoreSetupRepository implements StoreSetupSessionRepositoryInterface
     {
         $uuid = wp_generate_uuid4();
         $now = current_time('mysql', 1);
-        $expires_at = date('Y-m-d H:i:s', time() + (30 * DAY_IN_SECONDS));
+        $ttlDays = (int) get_option('vmp_store_setup_session_ttl_days', 30);
+        if ($ttlDays <= 0) $ttlDays = 30;
+        $expires_at = date('Y-m-d H:i:s', time() + ($ttlDays * DAY_IN_SECONDS));
         $data = [
             'user_id' => $userId,
             'vendor_request_id' => $vendorRequestId,
             'session_uuid' => $uuid,
             'status' => 'in_progress',
             'current_step' => 1,
+            'last_saved_step' => 0,
             'payload' => wp_json_encode($initialPayload),
             'completed_steps' => wp_json_encode([]),
             'started_at' => $now,
@@ -77,6 +80,7 @@ class StoreSetupRepository implements StoreSetupSessionRepositoryInterface
             'payload' => wp_json_encode($payload),
             'completed_steps' => wp_json_encode($completed),
             'current_step' => $step,
+            'last_saved_step' => $step,
             'last_activity_at' => $now,
             'updated_at' => $now,
         ], ['id' => $sessionId]);
