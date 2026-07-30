@@ -1,6 +1,13 @@
 <?php
 // Register listeners for vendor events. This file should be included on plugins_loaded.
+use VMP\Modules\VendorRegistration\Services\CapabilityManager;
+
 add_action('plugins_loaded', function() {
+    // ensure capabilities are present (runs on every request but is idempotent)
+    if (class_exists(CapabilityManager::class)) {
+        CapabilityManager::register();
+    }
+
     // services
     $templatesDir = plugin_dir_path(__FILE__) . '/../../../templates/emails';
     $emailChannel = new \VMP\Modules\VendorRegistration\Services\NotificationChannels\EmailChannel($templatesDir);
